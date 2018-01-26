@@ -16,8 +16,8 @@ from fast_rcnn.config import cfg
 class index(object):
     """Image database."""
 
-    def __init__(self):
-        pass
+    def __init__(self,dataset):
+        self.dataset = dataset
 
     def _load_image_set_index(self):
         pass

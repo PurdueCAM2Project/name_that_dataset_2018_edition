@@ -52,6 +52,9 @@ class sun(imdb):
         self._image_path = os.path.join(self._data_path,
                                         'JPEGImages','{}'+self._image_ext)
 
+
+        self.dataset_name = "sun" # for index class
+
         # SUN specific config options
         self.config = {'cleanup'     : True,
                        'use_salt'    : False,

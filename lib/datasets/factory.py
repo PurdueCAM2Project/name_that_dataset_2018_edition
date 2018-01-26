@@ -82,3 +82,10 @@ def get_imdb(name):
 def list_imdbs():
     """List all registered imdbs."""
     return __sets.keys()
+
+def create_unite(names):
+    imdb_list = [None]*len(names)
+    for ix,name in enumerate(names):
+        imdb_list[ix] = get_imdb(name)
+    united = unite(imdb_list)
+    return imdb_list

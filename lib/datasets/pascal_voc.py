@@ -56,7 +56,9 @@ class pascal_voc(imdb):
         self._comp_id = 'comp4'
         self._image_path = os.path.join(self._data_path,
                                         'JPEGImages','{}'+self._image_ext)
-
+        self._index_objects = [None]*len(self._image_index)
+        self._create_index_objects() # for index class
+        self.dataset_name = "voc" # for index class
 
         # PASCAL specific config options
         self.config = {'cleanup'     : True,
@@ -393,6 +395,10 @@ class pascal_voc(imdb):
         else:
             self.config['use_salt'] = True
             self.config['cleanup'] = True
+
+    def _create_index_objects(self):     
+        for ix,index in enumerate(self._image_index):
+            self._index_objects = {"dataset":"voc","index":index}
 
 if __name__ == '__main__':
     from datasets.pascal_voc import pascal_voc
