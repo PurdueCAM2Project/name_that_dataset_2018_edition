@@ -42,6 +42,7 @@ class sun(imdb):
         self._classes = ('__background__', # always index 0
                          'person')
 
+        self.dataset_name = "sun"
         self._class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
         self._image_ext = '.jpg'
         self._image_index = self._load_image_set_index()
@@ -49,11 +50,6 @@ class sun(imdb):
         self._roidb_handler = self.selective_search_roidb
         self._salt = str(uuid.uuid4())
         self._comp_id = 'comp4'
-        self._image_path = os.path.join(self._data_path,
-                                        'JPEGImages','{}'+self._image_ext)
-
-
-        self.dataset_name = "sun" # for index class
 
         # SUN specific config options
         self.config = {'cleanup'     : True,

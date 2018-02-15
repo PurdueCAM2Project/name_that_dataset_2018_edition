@@ -63,8 +63,9 @@ class coco(imdb):
         self._class_to_coco_cat_id = dict(zip([c['name'] for c in cats],
                                               self._COCO.getCatIds()))
         self._image_index = self._load_image_set_index()
+        self.dataset_name = "coco"
         # Default to roidb handler
-        self.set_proposal_method('selective_search')
+        self.set_proposal_method('gt')
         self.competition_mode(False)
 
         # Some image sets are "views" (i.e. subsets) into others.
@@ -84,7 +85,7 @@ class coco(imdb):
         # do not have gt annotations)
         self._gt_splits = ('train', 'val', 'minival')
         self._image_path = os.path.join(self._data_path,
-                                        'JPEGImages','{}'+self._image_ext)
+                                        'JPEGImages','{}'+'.jpg')
 
 
     def _get_ann_file(self):

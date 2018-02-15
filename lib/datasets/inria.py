@@ -5,7 +5,7 @@
 # Written by Ross Girshick
 # --------------------------------------------------------
 
-import os,sys
+import os,sys,re
 from datasets.imdb import imdb
 import datasets.ds_utils as ds_utils
 import xml.etree.ElementTree as ET
@@ -16,37 +16,35 @@ import utils.cython_bbox
 import cPickle
 import subprocess
 import uuid
-from sun_eval import sun_eval
+from inria_eval import inria_eval
 from fast_rcnn.config import cfg
 
 class inria(imdb):
     def __init__(self, image_set, year, devkit_path=None):
-        imdb.__init__(self, 'sun_' + year + '_' + image_set)
+        imdb.__init__(self, 'inria_' + year + '_' + image_set)
         self._year = year
         self._image_set = image_set
         self._anno_set_dir = image_set
-        if "val" in image_set:
-            if "val1" in image_set:
-                self._anno_set_dir = "val1"
-            if "val2" in image_set:
-                self._anno_set_dir = "val2"
-        elif "train" in image_set:
+        if "train" in image_set:
             self._anno_set_dir = "train"
         elif "test" in image_set:
             self._anno_set_dir = "test"
+        elif "all" in image_set:
+            self._anno_set_dir = "all"
 
         self._devkit_path = self._get_default_path() if devkit_path is None \
                             else devkit_path
-        self._data_path = os.path.join(self._devkit_path, 'SUN' + self._year)
+        self._data_path = os.path.join(self._devkit_path, 'INRIA' + self._year)
 
         self._classes = ('__background__', # always index 0
                          'person')
 
+        self.dataset_name = "inria"
         self._class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
-        self._image_ext = '.jpg'
+        self._image_ext = '.png'
         self._image_index = self._load_image_set_index()
         # Default to roidb handler
-        self._roidb_handler = self.selective_search_roidb
+        self._roidb_handler = self.gt_roidb
         self._salt = str(uuid.uuid4())
         self._comp_id = 'comp4'
 
@@ -59,7 +57,7 @@ class inria(imdb):
                        'min_size'    : 2}
 
         assert os.path.exists(self._devkit_path), \
-                'SUN path does not exist: {}'.format(self._devkit_path)
+                'INRIA path does not exist: {}'.format(self._devkit_path)
         assert os.path.exists(self._data_path), \
                 'Path does not exist: {}'.format(self._data_path)
 
@@ -84,7 +82,7 @@ class inria(imdb):
         Load the indexes listed in this dataset's image set file.
         """
         # Example path to image set file:
-        # self._devkit_path + /SUN2012/ImageSets/Main/all.txt
+        # self._devkit_path + /INRIA2005/ImageSets/Main/all.txt
         image_set_file = os.path.join(self._data_path, 'ImageSets', 'Main',
                                       self._image_set + '.txt')
         assert os.path.exists(image_set_file), \
@@ -97,7 +95,7 @@ class inria(imdb):
         """
         Return the default path where PASCAL VOC is expected to be installed.
         """
-        return os.path.join(cfg.DATA_DIR, 'SUNdevkit' + self._year)
+        return os.path.join(cfg.DATA_DIR, 'INRIAdevkit' + self._year)
 
     def gt_roidb(self):
         """
@@ -112,7 +110,7 @@ class inria(imdb):
             print '{} gt roidb loaded from {}'.format(self.name, cache_file)
             return roidb
 
-        gt_roidb = [self._load_pascal_annotation(index)
+        gt_roidb = [self._load_inria_annotation(index)
                     for index in self.image_index]
         with open(cache_file, 'wb') as fid:
             cPickle.dump(gt_roidb, fid, cPickle.HIGHEST_PROTOCOL)
@@ -186,48 +184,44 @@ class inria(imdb):
 
         return self.create_roidb_from_box_list(box_list, gt_roidb)
 
-    def _load_pascal_annotation(self, index):
+    def _load_inria_annotation(self, index):
         """
         Load image and bounding boxes info from XML file in the PASCAL VOC
         format.
         """
-        filename = os.path.join(self._data_path, 'Annotations', index + '.xml')
-        print(filename)
-        tree = ET.parse(filename)
-        objs = tree.findall('object')
-        if not self.config['use_diff']:
-            # Exclude the samples labeled as difficult
-            non_diff_objs = [
-                obj for obj in objs if int(obj.find('difficult').text) == 0]
-            # if len(non_diff_objs) != len(objs):
-            #     print 'Removed {} difficult objects'.format(
-            #         len(objs) - len(non_diff_objs))
-            objs = non_diff_objs
-        num_objs = len(objs)
+        filename = os.path.join(self._data_path, 'Annotations', index + '.txt')
+        with open(filename,"r") as f:
+            annos = f.readlines()
+        
+        num_objs = 0
+        for idx,line in enumerate(annos):
+            m = re.match(r"^Bounding.* : \((?P<xmin>[0-9]+), (?P<ymin>[0-9]+)\) - \((?P<xmax>[0-9]+), (?P<ymax>[0-9]+)\)",line)
+            if m is not None:
+                num_objs += 1
 
         boxes = np.zeros((num_objs, 4), dtype=np.uint16)
         gt_classes = np.zeros((num_objs), dtype=np.int32)
         overlaps = np.zeros((num_objs, self.num_classes), dtype=np.float32)
         # "Seg" area for pascal is just the box area
         seg_areas = np.zeros((num_objs), dtype=np.float32)
-
-        # Load object bounding boxes into a data frame.
-        for ix, obj in enumerate(objs):
-            if("person" in obj.find('name').text.lower().strip()):
-                bbox = obj.find('bndbox')
-                # Make pixel indexes 0-based
-                x1 = float(bbox.find('xmin').text) - 1
-                y1 = float(bbox.find('ymin').text) - 1
-                x2 = float(bbox.find('xmax').text) - 1
-                y2 = float(bbox.find('ymax').text) - 1
-                cls = "person"#self._class_to_ind["person"]
+        ix = 0
+        for line in annos:
+            m = re.match(r"^Bounding.* : \((?P<xmin>[0-9]+), (?P<ymin>[0-9]+)\) - \((?P<xmax>[0-9]+), (?P<ymax>[0-9]+)\)",line)
+            if m is not None:
+                mgd = m.groupdict()
+                x1 = float(mgd['xmin'])
+                y1 = float(mgd['ymin'])
+                x2 = float(mgd['xmax'])
+                y2 = float(mgd['ymax'])
+                cls = self._class_to_ind["person"]
                 boxes[ix, :] = [x1, y1, x2, y2]
                 gt_classes[ix] = cls
                 overlaps[ix, cls] = 1.0
                 seg_areas[ix] = (x2 - x1 + 1) * (y2 - y1 + 1)
+                ix += 1
 
         overlaps = scipy.sparse.csr_matrix(overlaps)
-
+                
         return {'boxes' : boxes,
                 'gt_classes': gt_classes,
                 'gt_overlaps' : overlaps,
@@ -254,7 +248,7 @@ class inria(imdb):
         for cls_ind, cls in enumerate(self.classes):
             if cls == '__background__':
                 continue
-            print 'Writing {} SUN results file'.format(cls)
+            print 'Writing {} INRIA results file'.format(cls)
             filename = self._get_voc_results_file_template().format(cls)
             print(filename)
             with open(filename, 'wt') as f:
@@ -263,7 +257,7 @@ class inria(imdb):
                     if dets == []:
                         print("NOTHING")
                         continue
-                    # i am not sure if SUN is "+1" or not so I will just be consistent with "+0"
+                    # i am not sure if INRIA is "+1" or not so I will just be consistent with "+0"
                     for k in xrange(dets.shape[0]):
                         f.write('{:s} {:.3f} {:.1f} {:.1f} {:.1f} {:.1f}\n'.
                                 format(index, dets[k, -1],
@@ -273,12 +267,12 @@ class inria(imdb):
     def _do_python_eval(self, output_dir = 'output'):
         annopath = os.path.join(
             self._devkit_path,
-            'SUN' + self._year,
-            'Annotations',
-            '{:s}.xml')
+            'INRIA' + self._year,
+            'Annotations',            
+            '{:s}.txt')
         imagesetfile = os.path.join(
             self._devkit_path,
-            'SUN' + self._year,
+            'INRIA' + self._year,
             'ImageSets',
             'Main',
             self._image_set + '.txt')
@@ -295,12 +289,12 @@ class inria(imdb):
             if cls == '__background__':
                 continue
             filename = self._get_voc_results_file_template().format(cls)
-            rec, prec, ap, ovthresh = sun_eval(
+            rec, prec, ap, ovthresh = inria_eval(
                 filename, annopath, imagesetfile, cls, cachedir, ovthresh=0.5,
                 use_07_metric=use_07_metric)
             aps += [ap]
         aps = np.array(aps)
-        results_fd = open("./results_sun.txt","w")
+        results_fd = open("./results_inria.txt","w")
         for kdx in range(len(ovthresh)):
             #print('{0:.3f}@{1:.2f}'.format(ap[kdx],ovthresh[kdx]))
             print('Mean AP = {:.4f} @ {:.2f}'.format(np.mean(aps[:,kdx]),ovthresh[kdx]))
@@ -377,8 +371,8 @@ class inria(imdb):
             self.config['cleanup'] = True
 
 if __name__ == '__main__':
-    from datasets.sun import sun
-    d = sun('all', '2012')
+    from datasets.inria import inria
+    d = inria('all', '2005')
     res = d.roidb
     from IPython import embed; embed()
 

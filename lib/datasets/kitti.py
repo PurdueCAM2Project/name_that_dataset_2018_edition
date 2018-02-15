@@ -42,9 +42,12 @@ class kitti(imdb):
         self._classes = ('__background__', # always index 0
                          'person')
 
+        self.dataset_name = "kitti"
         self._class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
-        self._image_ext = '.jpg'
+        self._image_ext = '.png'
         self._image_index = self._load_image_set_index()
+        self._image_path = os.path.join(self._data_path, 'image_2',
+                                  '{}' + self._image_ext)
         # Default to roidb handler
         self._roidb_handler = self.selective_search_roidb
         self._salt = str(uuid.uuid4())
@@ -56,7 +59,9 @@ class kitti(imdb):
                        'use_diff'    : False,
                        'matlab_eval' : False,
                        'rpn_file'    : None,
-                       'min_size'    : 2}
+                       'min_size'    : 2,
+                       'clean_annotations' : True,
+                       'only_people' : True}
 
         assert os.path.exists(self._devkit_path), \
                 'KITTI path does not exist: {}'.format(self._devkit_path)
@@ -73,7 +78,7 @@ class kitti(imdb):
         """
         Construct an image path from the image's "index" identifier.
         """
-        image_path = os.path.join(self._data_path, 'JPEGImages',
+        image_path = os.path.join(self._data_path, 'image_2',
                                   index + self._image_ext)
         assert os.path.exists(image_path), \
                 'Path does not exist: {}'.format(image_path)
@@ -84,7 +89,7 @@ class kitti(imdb):
         Load the indexes listed in this dataset's image set file.
         """
         # Example path to image set file:
-        # self._devkit_path + /KITTI2012/ImageSets/Main/all.txt
+        # self._devkit_path + /KITTI2013/ImageSets/Main/all.txt
         image_set_file = os.path.join(self._data_path, 'ImageSets', 'Main',
                                       self._image_set + '.txt')
         assert os.path.exists(image_set_file), \
@@ -192,13 +197,24 @@ class kitti(imdb):
         format.
         """
         filename = os.path.join(self._data_path, 'label_2', index + '.txt')
-        print(filename)
         with open(filename,"r") as f:
             annos = f.readlines()
-        print(annos)
 
-        num_objs = len(objs)
+        if self.config['clean_annotations']:
+            cleaned = [
+                obj for obj in annos \
+                if "Misc" not in obj.split()[0].strip() and
+                "DontCare" not in obj.split()[0].strip()
+            ]
+            annos = cleaned
 
+        if self.config['only_people']:
+            only_people = [
+                obj for obj in annos \
+                if obj.split()[0].strip().lower() in ["pedestrian","person_sitting","cyclist"]]
+            annos = only_people
+
+        num_objs = len(annos)
         boxes = np.zeros((num_objs, 4), dtype=np.uint16)
         gt_classes = np.zeros((num_objs), dtype=np.int32)
         overlaps = np.zeros((num_objs, self.num_classes), dtype=np.float32)
@@ -206,22 +222,25 @@ class kitti(imdb):
         seg_areas = np.zeros((num_objs), dtype=np.float32)
 
         # Load object bounding boxes into a data frame.
-        for ix, obj in enumerate(objs):
+        for ix, obj in enumerate(annos):
             obj = obj.strip().split()
-            if obj[0] in ["Pedestrian","Person_sitting"]:
-                print("HI")
-            # if("person" in obj.find('name').text.lower().strip()):
-            #     bbox = obj.find('bndbox')
-            #     # Make pixel indexes 0-based
-            #     x1 = float(bbox.find('xmin').text) - 1
-            #     y1 = float(bbox.find('ymin').text) - 1
-            #     x2 = float(bbox.find('xmax').text) - 1
-            #     y2 = float(bbox.find('ymax').text) - 1
-            #     cls = "person"#self._class_to_ind["person"]
-            #     boxes[ix, :] = [x1, y1, x2, y2]
-            #     gt_classes[ix] = cls
-            #     overlaps[ix, cls] = 1.0
-            #     seg_areas[ix] = (x2 - x1 + 1) * (y2 - y1 + 1)
+            obj[0] = obj[0].lower()
+            if obj[0] in ["pedestrian","person_sitting","cyclist"]:
+                obj[0] = "person"
+            else:
+                print("Failure of checking.... want only people")
+                sys.exit(1)
+            cls = self._class_to_ind[obj[0]]
+
+            x1 = float(obj[4])
+            y1 = float(obj[5])
+            x2 = float(obj[6])
+            y2 = float(obj[7])
+            boxes[ix, :] = [x1, y1, x2, y2]
+
+            gt_classes[ix] = cls
+            overlaps[ix, cls] = 1.0
+            seg_areas[ix] = (x2 - x1 + 1) * (y2 - y1 + 1)
 
         overlaps = scipy.sparse.csr_matrix(overlaps)
 
@@ -253,12 +272,15 @@ class kitti(imdb):
                 continue
             print 'Writing {} KITTI results file'.format(cls)
             filename = self._get_kitti_results_file_template().format(cls)
-            print(filename)
+            # print(filename)
+            # print(len(all_boxes),len(all_boxes[0]))
+            # for i in range(len(all_boxes)):
+            #     print(len(all_boxes[i]))
             with open(filename, 'wt') as f:
                 for im_ind, index in enumerate(self.image_index):
                     dets = all_boxes[cls_ind][im_ind]
-                    if dets == []:
-                        print("NOTHING")
+                    if len(dets) == 0:
+                        #print("NOTHING")
                         continue
                     # i am not sure if KITTI is "+1" or not so I will just be consistent with "+0"
                     for k in xrange(dets.shape[0]):
@@ -271,8 +293,8 @@ class kitti(imdb):
         annopath = os.path.join(
             self._devkit_path,
             'KITTI' + self._year,
-            'Annotations',
-            '{:s}.xml')
+            'label_2',
+            '{:s}.txt')
         imagesetfile = os.path.join(
             self._devkit_path,
             'KITTI' + self._year,
@@ -294,7 +316,7 @@ class kitti(imdb):
             filename = self._get_kitti_results_file_template().format(cls)
             rec, prec, ap, ovthresh = kitti_eval(
                 filename, annopath, imagesetfile, cls, cachedir, ovthresh=0.5,
-                use_07_metric=use_07_metric)
+                use_07_metric=use_07_metric,imagepath=self._image_path)
             aps += [ap]
         aps = np.array(aps)
         results_fd = open("./results_kitti.txt","w")
@@ -355,6 +377,13 @@ class kitti(imdb):
 
     def evaluate_detections(self, all_boxes, output_dir):
         self._write_kitti_results_file(all_boxes)
+        print(len(all_boxes))
+        for i in range(len(all_boxes)):
+            n = 0
+            for j in range(len(all_boxes[i])):
+                n += len(all_boxes[i][j])
+            print("{}: {}".format(i,n))
+
         self._do_python_eval(output_dir)
         if self.config['matlab_eval']:
             self._do_matlab_eval(output_dir)

@@ -17,6 +17,7 @@ from datasets.cam2 import cam2
 from datasets.pascal_voc import pascal_voc
 from datasets.imagenet import imagenet
 from datasets.coco import coco
+from datasets.unite import unite
 import numpy as np
 
 # Set up imagenet_<year>_<split>
@@ -61,15 +62,15 @@ for year in ['2009']:
         name = 'caltech_{}_{}'.format(year, split)
         __sets[name] = (lambda split=split, year=year: caltech(split, year))
 
-# Set up kitti_2013_<split> # TODO
+# Set up kitti_2013_<split>
 for year in ['2013']:
     for split in ['val','train','test','all']:
         name = 'kitti_{}_{}'.format(year, split)
         __sets[name] = (lambda split=split, year=year: kitti(split, year))
 
-# Set up inria_2005_<split> # TODO
+# Set up inria_2005_<split>
 for year in ['2005']:
-    for split in ['val','train','test','all']:
+    for split in ['train','test','all']:
         name = 'inria_{}_{}'.format(year, split)
         __sets[name] = (lambda split=split, year=year: inria(split, year))
 
@@ -87,5 +88,5 @@ def create_unite(names):
     imdb_list = [None]*len(names)
     for ix,name in enumerate(names):
         imdb_list[ix] = get_imdb(name)
-    united = unite(imdb_list)
-    return imdb_list
+    united = unite(imdb_list,100,True)
+    return united

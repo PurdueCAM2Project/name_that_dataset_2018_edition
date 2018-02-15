@@ -5,125 +5,45 @@
 # --------------------------------------------------------
 
 import xml.etree.ElementTree as ET
-import os,uuid,cv2
+import os,sys,re
 import cPickle
 import numpy as np
 
-"""
 def parse_rec(filename):
-    ""Parse a PASCAL VOC xml file ""
-    tree = ET.parse(filename)
+    """ Parse a INRIA txt file """
+    with open(filename,"r") as f:
+        annos = f.readlines()
+
+    ix = 0
     objects = []
-    for obj in tree.findall('object'):
-        obj_struct = {}
-        obj_struct['name'] = obj.find('name').text.strip()
-        polygon = obj.find('polygon')
-
-        xs = []
-        ys = []
-
-        for pt in polygon.findall('pt'):
-            xs += [int(pt.find('x').text)]
-            ys += [int(pt.find('y').text)]
-
-        obj_struct['bbox'] = [min(xs),
-                               min(ys),
-                               max(xs),
-                               max(ys)]
-        objects.append(obj_struct)
+    for line in annos:
+        m = re.match(r"^Bounding.* : \((?P<xmin>[0-9]+), (?P<ymin>[0-9]+)\) - \((?P<xmax>[0-9]+), (?P<ymax>[0-9]+)\)",line)
+        if m is not None:
+            mgd = m.groupdict()
+            x1 = float(mgd['xmin'])
+            y1 = float(mgd['ymin'])
+            x2 = float(mgd['xmax'])
+            y2 = float(mgd['ymax'])
+            obj_struct = {}
+            obj_struct['name'] = 'person'
+            obj_struct['bbox'] = [x1, y1, x2, y2]
+            objects.append(obj_struct)
+            ix += 1
 
     return objects
 
-"""
 
-def vis_detections(im, class_name, dets, thresh=0.5,name=""):
-    """Draw detected bounding boxes."""
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-
-    inds = np.where(dets[:, -1] >= thresh)[0]
-    if len(inds) == 0:
-        return
-
-    im = im[:, :, (2, 1, 0)]
-    fig, ax = plt.subplots(figsize=(12, 12))
-    ax.imshow(im, aspect='equal')
-    for i in inds:
-        bbox = dets[i, :4]
-        score = dets[i, -1]
-
-        ax.add_patch(
-            plt.Rectangle((bbox[0], bbox[1]),
-                          bbox[2] - bbox[0],
-                          bbox[3] - bbox[1], fill=False,
-                          edgecolor='red', linewidth=3.5)
-            )
-        ax.text(bbox[0], bbox[1] - 2,
-                '{:s} {:.3f}'.format(class_name, score),
-                bbox=dict(facecolor='blue', alpha=0.5),
-                fontsize=14, color='white')
-
-    ax.set_title(('{} detections with '
-                  'p({} | box) >= {:.1f}').format(class_name, class_name,
-                                                  thresh),
-                  fontsize=14)
-    plt.axis('off')
-    plt.tight_layout()
-    if name == "":
-        plt.savefig('vis_gt_{}.png'.format(str(uuid.uuid4())))
-    else:
-        plt.savefig(name.format(str(uuid.uuid4())))        
-
-def parse_rec(filename):
-        """
-        Load image and bounding boxes info from TXT file in the KITTI
-        format.
-        """
-        with open(filename,"r") as f:
-            annos = f.readlines()
-        cleaned = [
-            obj for obj in annos \
-            if "Misc" not in obj.split()[0].strip() and
-            "DontCare" not in obj.split()[0].strip()
-        ]
-        only_people = [
-                obj for obj in cleaned \
-        if obj.split()[0].strip().lower() in ["pedestrian","person_sitting","cyclist"]]
-        annos = only_people
-
-        num_objs = len(annos)
-        boxes = np.zeros((num_objs, 4), dtype=np.uint16)
-        objects = []
-        # Load object bounding boxes into a data frame.
-        for obj in annos:
-            obj = obj.strip().split()
-            obj[0] = obj[0].lower()
-            if obj[0] in ["pedestrian","person_sitting","cyclist"]:
-                obj[0] = "person"
-            obj_struct = {}
-            obj_struct['name'] = obj[0]
-            x1 = float(obj[4])
-            y1 = float(obj[5])
-            x2 = float(obj[6])
-            y2 = float(obj[7])
-            obj_struct['bbox'] = [x1, y1, x2, y2]
-            objects.append(obj_struct)
-        return objects
-
-
-def voc_ap(rec, prec, clsnm,use_07_metric=False,viz=False):
+def voc_ap(rec, prec, clsnm,use_07_metric=False):
     """ ap = voc_ap(rec, prec, [use_07_metric])
     Compute VOC AP given precision and recall.
     If use_07_metric is true, uses the
     VOC 07 11 point method (default:False).
     """
-    if viz:
-        import matplotlib
-        matplotlib.use('Agg')
-        import matplotlib.pyplot as plt
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
 
-    use_07_metric = False
+    use_07_metric = True
 
     if use_07_metric:
         # 11 point metric
@@ -139,8 +59,7 @@ def voc_ap(rec, prec, clsnm,use_07_metric=False,viz=False):
         # first append sentinel values at the end
         mrec = np.concatenate(([0.], rec, [1.]))
         mpre = np.concatenate(([0.], prec, [0.]))
-        if viz:
-            plt.plot(mrec,mpre,"g.")
+        plt.plot(mrec,mpre,"g.")
 
         # compute the precision envelope
         for i in range(mpre.size - 1, 0, -1):
@@ -154,28 +73,25 @@ def voc_ap(rec, prec, clsnm,use_07_metric=False,viz=False):
         # and sum (\Delta recall) * prec
         ap = np.sum((mrec[i + 1] - mrec[i]) * mpre[i + 1])
 
-        if viz:
-            print(mrec.shape,mpre.shape,ap.shape)
-            # plt.plot(mrec,mpre,"ro",mrec,ap,"g^")
-            plt.plot(mrec,mpre,"r+")
-            plt.tight_layout()
-            plt.xlabel('Recall')
-            plt.ylabel('Precision')
-            plt.title("AP: {}".format(ap))
-            plt.savefig(clsnm + "_apPlt.png")        
-            plt.clf()
-            # time.sleep(30)
+        #plt.plot(mrec,mpre,"ro",mrec,ap,"g^")
+        # plt.plot(mrec,mpre,"r+")
+        # plt.tight_layout()
+        # plt.xlabel('Recall')
+        # plt.ylabel('Precision')
+        # plt.title("AP{}".format(ap))
+        # plt.savefig(clsnm + "_apPlt.png")        
+        # plt.clf()
+        #time.sleep(30)
 
     return ap
 
-def kitti_eval(detpath,
-               annopath,
-               imagesetfile,
-               classname,
-               cachedir,
-               ovthresh=0.5,
-               use_07_metric=False,
-               imagepath=None):
+def inria_eval(detpath,
+             annopath,
+             imagesetfile,
+             classname,
+             cachedir,
+             ovthresh=0.5,
+             use_07_metric=False):
     """rec, prec, ap = voc_eval(detpath,
                                 annopath,
                                 imagesetfile,
@@ -230,20 +146,14 @@ def kitti_eval(detpath,
     # extract gt objects for this class
     class_recs = {}
     npos = 0
-    n = 0
-    vis_gt_ex = False
     for imagename in imagenames:
-        R = [obj for obj in recs[imagename] if obj['name'] == classname]
+        R = [obj for obj in recs[imagename]] # accept all --> they are all people
         bbox = np.array([x['bbox'] for x in R])
         npos = npos + len(bbox)
         det = [False] * len(R)
         class_recs[imagename] = {'bbox': bbox,
                                  'det': det}
 
-        if n < 10 and len(bbox) > 0 and vis_gt_ex == True:
-            im = cv2.imread(imagepath.format(imagename))
-            vis_detections(im, classname, class_recs[imagename]['bbox'], thresh=0.1)
-            n += 1
     # read dets
     detfile = detpath.format(classname)
     with open(detfile, 'r') as f:
@@ -259,37 +169,6 @@ def kitti_eval(detpath,
     sorted_scores = np.sort(-confidence)
     BB = BB[sorted_ind, :]
     image_ids = [image_ids[x] for x in sorted_ind]
-
-
-
-    vis_det_ex = True
-    if vis_det_ex:
-        image_ids_to_idx = {}
-        for idx,img_id in enumerate(image_ids):
-            if img_id in image_ids_to_idx.keys():
-                image_ids_to_idx[img_id] += [idx]
-            else:
-                image_ids_to_idx[img_id] = [idx]
-
-        n = 10
-        ids = np.random.permutation(len(BB))[:n]
-        for i,idx in enumerate(ids): # we want "n" unique images
-            # we need to grab "class_recs[image_ids[d]]"
-            print(i,idx)
-            image_id = image_ids[idx]
-            # now find all the indicies with the given image_id
-            image_idx = image_ids_to_idx[image_id]
-            bbox = BB[image_idx,:]
-            conf = -1*sorted_scores[image_idx]
-            print(conf)
-            bboxes = np.concatenate((bbox,conf[:,np.newaxis]),axis=1)
-            if len(bboxes) > 0:
-                im = cv2.imread(imagepath.format(image_id))
-                vis_detections(im, classname, bboxes, thresh=0.20,name="vis_det_{}.png")
-                n += 1
-            else:
-                print("ohno!")
-                sys.exit(1)
 
     ovthresh = [0.5,0.75,0.95]
     nd = len(image_ids)

@@ -66,7 +66,8 @@ class imagenet(imdb):
         self._roidb_handler = self.selective_search_roidb
         self._salt = str(uuid.uuid4())
         self._comp_id = 'comp4'
-
+        self.dataset_name = "imagenet"
+        
         # ImageNet specific config options (Kent :D)
         self.config = {'top_k' : 2000,
                        'use_salt' : True,

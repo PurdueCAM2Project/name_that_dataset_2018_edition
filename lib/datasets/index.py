@@ -16,7 +16,7 @@ from fast_rcnn.config import cfg
 class index(object):
     """Image database."""
 
-    def __init__(self,dataset):
+    def __init__(self,value,dataset):
         self.dataset = dataset
 
     def _load_image_set_index(self):
@@ -37,3 +37,21 @@ class i_sun(index):
         assert os.path.exists(image_path), \
                 'Path does not exist: {}'.format(image_path)
         return image_path
+
+class i_voc(index):
+
+    def __init__(self, index_info, dataset):
+        index.__init__(self)
+        self._index = index_info
+        self._image_path = dataset._image_path
+
+    def image_path_from_index(self, index):
+        """
+        Construct an image path from the image's "index" identifier.
+        """
+        assert os.path.exists(image_path), \
+                'Path does not exist: {}'.format(image_path)
+        return image_path
+
+
+

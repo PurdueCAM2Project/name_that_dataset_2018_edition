@@ -58,7 +58,7 @@ class pascal_voc(imdb):
                                         'JPEGImages','{}'+self._image_ext)
         self._index_objects = [None]*len(self._image_index)
         self._create_index_objects() # for index class
-        self.dataset_name = "voc" # for index class
+        self.dataset_name = "voc" + "_" + self._year # for index class
 
         # PASCAL specific config options
         self.config = {'cleanup'     : True,

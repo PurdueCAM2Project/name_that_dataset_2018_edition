@@ -7,6 +7,7 @@
 
 import os,sys
 from datasets.imdb import imdb
+import roi_data_layer.roidb as rdl_roidb
 import datasets.ds_utils as ds_utils
 import xml.etree.ElementTree as ET
 import numpy as np
@@ -19,11 +20,20 @@ import uuid
 from voc_eval import voc_eval
 from fast_rcnn.config import cfg
 
+from datasets.inria import inria
+from datasets.kitti import kitti
+from datasets.caltech import caltech
+from datasets.sun import sun
+from datasets.cam2 import cam2
+from datasets.pascal_voc import pascal_voc
+from datasets.imagenet import imagenet
+from datasets.coco import coco
+
 class merged(imdb):
 
-    def __init__(self, image_set, year, devkit_path=None):
+    def __init__(self, image_set, year, devkit_path=None, shuffled=None):
         
-        imdb.__init__(self, 'voc_' + year + '_' + image_set)
+        imdb.__init__(self, 'merged_' + image_set)
         self._year = year
         self._image_set = image_set
         self._anno_set_dir = image_set
@@ -38,16 +48,42 @@ class merged(imdb):
         elif "test" in image_set:
             self._anno_set_dir = "test"
         
+        if image_set == "train":
+            self.imdbs = [imagenet(image_set),\
+                        coco(image_set, '2015'),\
+                        cam2(image_set,'2017'),\
+                        sun(image_set,'2012'),\
+                        caltech(image_set,'2009'),\
+                        kitti(image_set,'2013'),\
+                        inria(image_set,'2005'),\
+                        pascal_voc(image_set,'2007'),\
+                        pascal_voc(image_set,'2012')]
+        elif image_set == "test":
+            self.imdbs = [imagenet('val'),\
+                        coco('test-dev', '2015'),\
+                        cam2('all','2017'),\
+                        sun('test','2012'),\
+                        caltech('test','2009'),\
+                        kitti('val','2013'),\
+                        inria('all','2005'),\
+                        pascal_voc('test','2007')]
+
+        self.roidbs = [None for _ in range(len(self.datasets))]
+        for idx,imdb in enumerate(self.imdbs):
+            self.roidbs[idx] = get_training_roidb(imdb)
 
         self._devkit_path = self._get_default_path() if devkit_path is None \
                             else devkit_path
         self._data_path = os.path.join(self._devkit_path, 'VOC' + self._year)
         self._classes = ('__background__', # always index 0
-                         'aeroplane', 'bicycle', 'bird', 'boat',
-                         'bottle', 'bus', 'car', 'cat', 'chair',
-                         'cow', 'diningtable', 'dog', 'horse',
-                         'motorbike', 'person', 'pottedplant',
-                         'sheep', 'sofa', 'train', 'tvmonitor')
+                         'voc',
+                         'imagenet',
+                         'caltech',
+                         'coco',
+                         'sun',
+                         'kitti',
+                         'inria',
+                         'cam2')
         self._class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
         self._image_ext = '.jpg'
         self._image_index = self._load_image_set_index()
@@ -119,80 +155,35 @@ class merged(imdb):
             return roidb
 
         
-        gt_roidb = [self._load_pascal_annotation(index)
-                    for index in self.image_index]
+        _image_path = []
+        _image_index = []
+        gt_roidb = []
+        for dataset in datasets:
+            _image_path += dataset._image_path
+            _image_index_ = dataset._image_index
+            for idx,ind in enumerate(_image_index):
+                _image_index[idx] = index(ind,dataset.name)
+            gt_roidb += np.repeat(self._class_to_ind(dataset['name']),\
+                                [dataset['num_imgs']],axis=0)
+
         with open(cache_file, 'wb') as fid:
             cPickle.dump(gt_roidb, fid, cPickle.HIGHEST_PROTOCOL)
         print 'wrote gt roidb to {}'.format(cache_file)
 
         return gt_roidb
 
-    def selective_search_roidb(self):
+    def image_path_from_index(self,index):
         """
-        Return the database of selective search regions of interest.
-        Ground-truth ROIs are also included.
-
-        This function loads/saves from/to a cache file to speed up future calls.
+        Construct an image path from the image's "index" identifier.
         """
-        cache_file = os.path.join(self.cache_path,
-                                  self.name + '_selective_search_roidb.pkl')
+        if index.dataset
+        image_path = os.path.join(self._data_path, 'JPEGImages',
+                                  index + self._image_ext)
+        assert os.path.exists(image_path), \
+                'Path does not exist: {}'.format(image_path)
+        return image_path
 
-        if os.path.exists(cache_file):
-            with open(cache_file, 'rb') as fid:
-                roidb = cPickle.load(fid)
-            print '{} ss roidb loaded from {}'.format(self.name, cache_file)
-            return roidb
-
-        if int(self._year) == 2007 or int(self._year) == 2012 or self._image_set != 'test':
-            gt_roidb = self.gt_roidb()
-            ss_roidb = self._load_selective_search_roidb(gt_roidb)
-            roidb = imdb.merge_roidbs(gt_roidb, ss_roidb)
-        else:
-            roidb = self._load_selective_search_roidb(None)
-        with open(cache_file, 'wb') as fid:
-            cPickle.dump(roidb, fid, cPickle.HIGHEST_PROTOCOL)
-        print 'wrote ss roidb to {}'.format(cache_file)
-
-        return roidb
-
-    def rpn_roidb(self):
-        if int(self._year) == 2007 or init(self._year) == 2012 or self._image_set != 'test':
-            gt_roidb = self.gt_roidb()
-            rpn_roidb = self._load_rpn_roidb(gt_roidb)
-            roidb = imdb.merge_roidbs(gt_roidb, rpn_roidb)
-        else:
-            roidb = self._load_rpn_roidb(None)
-
-        return roidb
-
-    def _load_rpn_roidb(self, gt_roidb):
-        filename = self.config['rpn_file']
-        print 'loading {}'.format(filename)
-        assert os.path.exists(filename), \
-               'rpn data not found at: {}'.format(filename)
-        with open(filename, 'rb') as f:
-            box_list = cPickle.load(f)
-        return self.create_roidb_from_box_list(box_list, gt_roidb)
-
-    def _load_selective_search_roidb(self, gt_roidb):
-        filename = os.path.abspath(os.path.join(cfg.DATA_DIR,
-                                                'selective_search_data',
-                                                self.name + '.mat'))
-        assert os.path.exists(filename), \
-               'Selective search data not found at: {}'.format(filename)
-        raw_data = sio.loadmat(filename)['boxes'].ravel()
-
-        box_list = []
-        for i in xrange(raw_data.shape[0]):
-            boxes = raw_data[i][:, (1, 0, 3, 2)] - 1
-            keep = ds_utils.unique_boxes(boxes)
-            boxes = boxes[keep, :]
-            keep = ds_utils.filter_small_boxes(boxes, self.config['min_size'])
-            boxes = boxes[keep, :]
-            box_list.append(boxes)
-
-        return self.create_roidb_from_box_list(box_list, gt_roidb)
-
+        
     def _load_pascal_annotation(self, index):
         """
         Load image and bounding boxes info from XML file in the PASCAL VOC
