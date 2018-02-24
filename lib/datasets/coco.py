@@ -285,7 +285,8 @@ class coco(imdb):
                 'gt_classes': gt_classes,
                 'gt_overlaps' : overlaps,
                 'flipped' : False,
-                'seg_areas' : seg_areas}
+                'seg_areas' : seg_areas,
+                'set':self.name}
 
     def _get_box_file(self, index):
         # first 14 chars / first 22 chars / all chars + .mat

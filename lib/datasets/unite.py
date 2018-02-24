@@ -3,7 +3,7 @@
 # Written by Kent Gauen
 # --------------------------------------------------------
 
-import os,sys,cPickle,PIL,uuid
+import os,sys,cPickle,PIL,uuid,re
 from datasets.imdb import imdb
 import os.path as osp
 from fast_rcnn.train import get_training_roidb
@@ -14,7 +14,7 @@ from fast_rcnn.config import cfg
 
 class unite(imdb):
 
-    def __init__(self,imdb_list,num_per_set,shuffle=False,shuffled_set=None):
+    def __init__(self,imdb_list,num_per_set,shuffle=True,shuffled_set=None):
         self.imdb_list = imdb_list
         self.num_per_set = num_per_set
         self._roidb = None
@@ -39,10 +39,16 @@ class unite(imdb):
                 self._classes += ["voc"]
             elif "voc" not in cls:
                 self._classes += [cls]
+        # labels
+        self._class_to_ind = dict(zip(self.classes, xrange(self.num_classes)))
 
-        self._randomize_gt_roidb()
+        #self._randomize_gt_roidb()
+        self._image_index = self._load_image_set_index()
 
         self._name = "united"
+
+    def _load_image_set_index(self):
+        return self._virtual_index
 
     def gt_roidb(self):
         """
@@ -57,11 +63,13 @@ class unite(imdb):
             print '{} gt roidb loaded from {}'.format(self.name, cache_file)
             self._virtual_index = gt_dict['vi']
             self._gt_classes = gt_dict['gt_classes']
+            self._image_index = self._load_image_set_index()
             return gt_dict['gt_roidb']
         
         gt_dict = self._create_gt_roidb_fixed()
         self._virtual_index = gt_dict['vi']
         self._gt_classes = gt_dict['gt_classes']
+        self._image_index = self._load_image_set_index()
 
         with open(cache_file, 'wb') as fid:
             cPickle.dump(gt_dict, fid, cPickle.HIGHEST_PROTOCOL)
@@ -80,6 +88,7 @@ class unite(imdb):
         print("writing shuffled indicies to {}".format(filename))
         fid = open(filename,"w")
         cPickle.dump(self._shuffled,fid)
+        fid.close()
         
     def _load_shuffled_sets(self,filename):
         """
@@ -118,12 +127,24 @@ class unite(imdb):
             gt_classes += [imdb.dataset_name for _ in range(self.num_per_set)]
             if self._shuffled is not None:
                 assert len(self._shuffled[imdb.dataset_name]) == self.num_per_set, "The shuffled indicies need to be the same size as the number of loaded datums per image set"
-                gt_roidb += [roidb[i] for i in self._shuffled[imdb.dataset_name]]
+                for i in self._shuffled[imdb.dataset_name]:
+                    cls_set = roidb[i]['set']
+                    if "voc" in cls_set:
+                        cls_set = "voc"
+                    else:
+                        m = re.match(r"(?P<id>[A-Za-z0-9]+)_.*",cls_set)
+                        if m is None:
+                            raise ValueError("cls_set variable is not parsable: {}".format(cls_set))
+                        cls_set = m.groupdict()["id"]
+                    roidb[i]['set'] = self._class_to_ind[cls_set]
+                    gt_roidb += [roidb[i]]
                 virtual_index += [imdb.image_index[i] for i in self._shuffled[imdb.dataset_name]]
             else:
                 gt_roidb += roidb[:self.num_per_set]
                 virtual_index += imdb.image_index[:self.num_per_set]
+        print("created gtroidb")
         return {"gt_roidb":gt_roidb,"gt_classes":gt_classes,"vi":virtual_index}
+
 
     def _randomize_gt_roidb(self):
         if self._num_gt == 0:
@@ -141,8 +162,8 @@ class unite(imdb):
         """
         Return the absolute path to image i in the image sequence.
         """
-        # note that "i" is an "index" class
         imdb = self.imdb_dict[self._gt_classes[i]]
-        return imdb.image_path_from_index(imdb.image_index[self._virtual_index[i.index]])
+        return imdb.image_path_from_index(self._virtual_index[i])
+        #return imdb.image_path_from_index(imdb.image_index[self._virtual_index[i]])
         
 

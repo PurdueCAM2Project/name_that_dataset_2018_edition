@@ -9,7 +9,7 @@
 
 import caffe
 from fast_rcnn.config import cfg
-import roi_data_layer.roidb as rdl_roidb
+import vae_data_layer.roidb as rdl_roidb
 from utils.timer import Timer
 import numpy as np
 import os
@@ -35,12 +35,6 @@ class SolverWrapper(object):
             # RPN can only use precomputed normalization because there are no
             # fixed statistics to compute a priori
             assert cfg.TRAIN.BBOX_NORMALIZE_TARGETS_PRECOMPUTED
-
-        if cfg.TRAIN.BBOX_REG:
-            print 'Computing bounding-box regression targets...'
-            self.bbox_means, self.bbox_stds = \
-                    rdl_roidb.add_bbox_regression_targets(roidb)
-            print 'done'
 
         self.solver = caffe.SGDSolver(solver_prototxt)
         
@@ -93,9 +87,9 @@ class SolverWrapper(object):
         print 'Wrote snapshot to: {:s}'.format(filename)
 
         # save solverstate 
-        filename = (self.solver_param.snapshot_prefix + infix +
-                    '_iter_{:d}'.format(self.solver.iter) + '.solverstate')
-        filename = os.path.join(self.output_dir, filename)
+        # filename = (self.solver_param.snapshot_prefix + infix +
+        #             '_iter_{:d}'.format(self.solver.iter) + '.solverstate')
+        # filename = os.path.join(self.output_dir, filename)
 
         self.solver.save(str(filename))
 
@@ -113,7 +107,6 @@ class SolverWrapper(object):
         last_snapshot_iter = -1
         timer = Timer()
         model_paths = []
-
         print(self.snapshot())
         while self.solver.iter < max_iters:
             # Make one SGD update
@@ -172,7 +165,7 @@ def train_net(solver_prototxt, roidb, output_dir,
               pretrained_model=None, solver_state=None, max_iters=40000):
     """Train a Fast R-CNN network."""
 
-    roidb = filter_roidb(roidb)
+    #roidb = filter_roidb(roidb)
     sw = SolverWrapper(solver_prototxt, roidb, output_dir,
                        pretrained_model=pretrained_model,
                        solver_state=solver_state)

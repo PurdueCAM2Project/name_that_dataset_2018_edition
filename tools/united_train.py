@@ -10,8 +10,8 @@
 """Train a Fast R-CNN network on a region of interest database."""
 
 import _init_paths
-from fast_rcnn.train import get_training_roidb, train_net
-from fast_rcnn.config import cfg, cfg_from_file, cfg_from_list, get_output_dir
+from core.train import get_training_roidb, train_net
+from core.config import cfg, cfg_from_file, cfg_from_list, get_output_dir
 from datasets.factory import get_imdb
 from datasets.factory import create_unite
 import datasets.imdb
@@ -81,6 +81,29 @@ def combined_roidb(imdb_names):
     return imdb, roidb
 
 if __name__ == '__main__':
+    args = parse_args()
+
+    print('Called with args:')
+    print(args)
+
+    if args.cfg_file is not None:
+        cfg_from_file(args.cfg_file)
+    if args.set_cfgs is not None:
+        cfg_from_list(args.set_cfgs)
+
+    cfg.GPU_ID = args.gpu_id
+
+    print('Using config:')
+    pprint.pprint(cfg)
+
+    if not args.randomize:
+        # fix the random seeds (numpy and caffe) for reproducibility
+        np.random.seed(cfg.RNG_SEED)
+        caffe.set_random_seed(cfg.RNG_SEED)
+
+    # set up caffe
+    caffe.set_mode_gpu()
+    caffe.set_device(args.gpu_id)
 
     datasets = ["voc_2007_trainval",
                 "voc_2012_trainval",
@@ -92,6 +115,19 @@ if __name__ == '__main__':
                 "kitti_2013_train",
                 "inria_2005_train"]
                 
-    united = create_unite(datasets)
-    print(united.classes)
-    print(len(united.roidb))
+    mini_datasets = ["voc_2007_trainval",
+                "voc_2012_trainval",
+                "inria_2005_train"]
+                
+    imdb = create_unite(mini_datasets)
+    roidb =  get_training_roidb(imdb)
+
+    print '{:d} roidb entries'.format(len(roidb))
+
+    output_dir = get_output_dir(imdb)
+    print 'Output will be saved to `{:s}`'.format(output_dir)
+
+    train_net(args.solver, roidb, output_dir,
+              pretrained_model=args.pretrained_model,
+              solver_state=args.solver_state,
+              max_iters=args.max_iters)
